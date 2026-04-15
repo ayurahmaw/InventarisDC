@@ -2,21 +2,45 @@ import streamlit as st
 import pandas as pd
 import sqlite3
 import io
+import math
 import plotly.express as px
 from datetime import datetime
+from typing import Any
+
+# ==========================================
+# KONSTANTA GLOBAL
+# ==========================================
+DATABASE_FILE_PATH = 'inventaris_v2.db'
+
+# Konstanta Kolom Database / Excel
+COL_DEVICE_NAME = "Nama Perangkat"
+COL_BRAND = "Brand"
+COL_IP_ADDRESS = "IP Address"
+COL_SERIAL_NUMBER = "Serial Number"
+COL_RACK_LOCATION = "Lokasi Rak"
+COL_PIC = "PIC"
+COL_CONDITION = "Kondisi"
+TEMPLATE_COLUMNS = [COL_DEVICE_NAME, COL_BRAND, COL_IP_ADDRESS, COL_SERIAL_NUMBER, COL_RACK_LOCATION, COL_PIC, COL_CONDITION]
+
+# Konstanta Status Kondisi
+CONDITION_GOOD = "Baik"
+CONDITION_BROKEN = "Rusak"
+CONDITION_MAINTENANCE = "Maintenance"
+
+# Konstanta Menu Navigasi
+MENU_ITEM_DASHBOARD = "Dashboard"
+MENU_ITEM_ADD = "Tambah Inventaris Baru"
+MENU_ITEM_LIST = "Lihat Daftar Inventaris"
 
 # ==========================================
 # 1. SETUP HALAMAN & TEMA (FRONTEND)
 # ==========================================
 
-# st.set_page_config WAJIB dipanggil pertama kali sebelum komponen Streamlit lainnya
 st.set_page_config(page_title="Inventaris Pusdatin", layout="wide", page_icon="📦")
 
-def apply_custom_css():
+def inject_custom_theme_css() -> None:
     """!
     @brief Menerapkan CSS Kustom untuk Antarmuka Aplikasi.
-    @details Mengubah tema aplikasi menjadi mode gelap (Dark Mode) khusus, menengahkan elemen sidebar, 
-    dan mengatur estetika tabel data serta formulir input.
     """
     st.markdown(""" 
     <style>
@@ -48,6 +72,7 @@ def apply_custom_css():
             font-weight: bold; color: #ecf0f1 !important;
             display: flex; align-items: center;
             border-bottom: 2px solid #34495e;
+            margin-top: 10px;
         }
         hr { border-top: 1px solid #34495e !important; margin: 0 !important; }
         
@@ -60,6 +85,7 @@ def apply_custom_css():
             background-color: #212F3C;
             border: 1px solid #566573;
             padding: 20px; border-radius: 10px;
+            margin-bottom: 20px;
         }
     </style>
     """, unsafe_allow_html=True)
@@ -68,415 +94,473 @@ def apply_custom_css():
 # 2. LOGIKA DATABASE (BACKEND)
 # ==========================================
 
-def init_db():
+def initialize_database() -> None:
     """!
-    @brief Menginisialisasi Database SQLite.
-    @details Membuat file `inventaris_v2.db` dan tabel `perangkat` secara otomatis apabila belum ada.
+    @brief Menginisialisasi Database SQLite secara aman menggunakan Context Manager.
     """
-    conn = sqlite3.connect('inventaris_v2.db')
-    c = conn.cursor()
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS perangkat (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nama_perangkat TEXT,
-            brand TEXT,
-            ip_address TEXT,
-            sn TEXT,
-            lokasi_rak TEXT,
-            pemilik TEXT,
-            kondisi TEXT,
-            tgl_update TEXT
-        )
-    ''')
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DATABASE_FILE_PATH) as db_connection:
+        db_cursor = db_connection.cursor()
+        db_cursor.execute('''
+            CREATE TABLE IF NOT EXISTS perangkat (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nama_perangkat TEXT,
+                brand TEXT,
+                ip_address TEXT,
+                sn TEXT,
+                lokasi_rak TEXT,
+                pemilik TEXT,
+                kondisi TEXT,
+                tgl_update TEXT
+            )
+        ''')
 
-def get_all_data():
+def fetch_all_inventory_data() -> pd.DataFrame:
     """!
-    @brief Mengambil seluruh entri data dari database.
-    @return pandas.DataFrame Data tabel perangkat yang diurutkan dari entri terbaru.
+    @brief Mengambil seluruh entri data dari tabel perangkat.
+    @return pandas.DataFrame Dataset inventaris lengkap.
     """
-    conn = sqlite3.connect('inventaris_v2.db')
-    df = pd.read_sql_query("SELECT * FROM perangkat ORDER BY id DESC", conn)
-    conn.close()
-    return df
+    with sqlite3.connect(DATABASE_FILE_PATH) as db_connection:
+        inventory_dataframe = pd.read_sql_query("SELECT * FROM perangkat ORDER BY id DESC", db_connection)
+    return inventory_dataframe
 
-def add_item(nama, brand, ip, sn, rak, pemilik, kondisi):
+def insert_new_device(device_name: str, brand_name: str, ip_address: str, serial_number: str, rack_location: str, pic_name: str, condition_status: str) -> None:
     """!
-    @brief Menyimpan record perangkat keras baru ke dalam database.
-    @param nama [str] Nama jenis perangkat.
-    @param brand [str] Merk perangkat.
-    @param ip [str] IP Address yang dialokasikan.
-    @param sn [str] Serial Number perangkat.
-    @param rak [str] Lokasi fisik rak di Data Center.
-    @param pemilik [str] Penanggungjawab / PIC BMN.
-    @param kondisi [str] Kondisi operasional barang.
+    @brief Menyimpan entri perangkat keras baru ke dalam sistem basis data.
     """
-    conn = sqlite3.connect('inventaris_v2.db')
-    c = conn.cursor()
-    tgl = datetime.now().strftime("%Y-%m-%d %H:%M")
-    c.execute('''INSERT INTO perangkat 
-                 (nama_perangkat, brand, ip_address, sn, lokasi_rak, pemilik, kondisi, tgl_update) 
-                 VALUES (?,?,?,?,?,?,?,?)''',
-              (nama, brand, ip, sn, rak, pemilik, kondisi, tgl))
-    conn.commit()
-    conn.close()
+    current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with sqlite3.connect(DATABASE_FILE_PATH) as db_connection:
+        db_cursor = db_connection.cursor()
+        db_cursor.execute('''INSERT INTO perangkat 
+                     (nama_perangkat, brand, ip_address, sn, lokasi_rak, pemilik, kondisi, tgl_update) 
+                     VALUES (?,?,?,?,?,?,?,?)''',
+                  (device_name, brand_name, ip_address, serial_number, rack_location, pic_name, condition_status, current_timestamp))
 
-def update_item(id_brg, nama, brand, ip, sn, rak, pemilik, kondisi):
+def update_existing_device(device_id: int, device_name: str, brand_name: str, ip_address: str, serial_number: str, rack_location: str, pic_name: str, condition_status: str) -> None:
     """!
-    @brief Memperbarui record perangkat keras eksisting.
-    @param id_brg [int] ID Baris dari perangkat di database.
-    @param nama, brand, ip, sn, rak, pemilik, kondisi [str] Data pembaruan yang akan ditimpa.
+    @brief Memperbarui data perangkat keras eksisting berdasarkan ID Primary Key.
     """
-    conn = sqlite3.connect('inventaris_v2.db')
-    c = conn.cursor()
-    tgl = datetime.now().strftime("%Y-%m-%d %H:%M")
-    c.execute('''UPDATE perangkat SET 
-                 nama_perangkat=?, brand=?, ip_address=?, sn=?, lokasi_rak=?, pemilik=?, kondisi=?, tgl_update=? 
-                 WHERE id=?''',
-              (nama, brand, ip, sn, rak, pemilik, kondisi, tgl, id_brg))
-    conn.commit()
-    conn.close()
+    current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with sqlite3.connect(DATABASE_FILE_PATH) as db_connection:
+        db_cursor = db_connection.cursor()
+        db_cursor.execute('''UPDATE perangkat SET 
+                     nama_perangkat=?, brand=?, ip_address=?, sn=?, lokasi_rak=?, pemilik=?, kondisi=?, tgl_update=? 
+                     WHERE id=?''',
+                  (device_name, brand_name, ip_address, serial_number, rack_location, pic_name, condition_status, current_timestamp, device_id))
 
-def delete_item(id_brg):
+def remove_device_by_id(device_id: int) -> None:
     """!
-    @brief Menghapus record dari database berdasarkan ID.
-    @param id_brg [int] ID perangkat yang ingin dihapus.
+    @brief Menghapus record secara permanen dari database.
     """
-    conn = sqlite3.connect('inventaris_v2.db')
-    c = conn.cursor()
-    c.execute('DELETE FROM perangkat WHERE id=?', (id_brg,))
-    conn.commit()
-    conn.close()
+    with sqlite3.connect(DATABASE_FILE_PATH) as db_connection:
+        db_cursor = db_connection.cursor()
+        db_cursor.execute('DELETE FROM perangkat WHERE id=?', (device_id,))
 
-def convert_df_to_excel(df):
+def export_dataframe_to_excel_bytes(dataframe_to_export: pd.DataFrame) -> bytes:
     """!
-    @brief Mengonversi tipe data Pandas DataFrame ke dalam Memory Bytes format Excel (.xlsx).
-    @param df [pandas.DataFrame] Dataset yang akan dikonversi.
-    @return [bytes] File stream agar bisa diunduh oleh komponen tombol Streamlit.
+    @brief Mengonversi objek DataFrame Pandas ke dalam bentuk binary Excel (.xlsx).
+    @return bytes Stream file raw yang siap dimuat oleh modul Download Streamlit.
     """
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data_DC')
-    return output.getvalue()
+    byte_output_stream = io.BytesIO()
+    with pd.ExcelWriter(byte_output_stream, engine='openpyxl') as excel_writer:
+        dataframe_to_export.to_excel(excel_writer, index=False, sheet_name='Data_DC')
+    return byte_output_stream.getvalue()
 
 # ==========================================
 # 3. KOMPONEN UI (MODULAR)
 # ==========================================
 
-def render_sidebar():
+def render_sidebar_navigation() -> str:
     """!
-    @brief Merender area Navigasi Sidebar.
-    @return [str] Menu yang sedang dipilih aktif oleh pengguna.
+    @brief Merender antarmuka Navigasi pada Sidebar.
+    @return str Indikator menu navigasi yang dipilih.
     """
     with st.sidebar:
         try:
             st.image("LogoKemhan.png", width=150) 
-        except:
+        except Exception:
             st.warning("Logo tidak ditemukan.")
 
         st.write("") 
         st.title("Pusdatin Kemhan")
         st.write("Sistem Inventaris DC")
         st.markdown("---")
-        menu = st.radio("NAVIGASI UTAMA", 
-                        ["Dashboard", "Tambah Inventaris Baru", "Lihat Daftar Inventaris"],
+        selected_menu = st.radio("NAVIGASI UTAMA", 
+                        [MENU_ITEM_DASHBOARD, MENU_ITEM_ADD, MENU_ITEM_LIST],
                         label_visibility="collapsed")
+        
+        # Validasi Fallback aman
+        if selected_menu is None:
+            selected_menu = MENU_ITEM_DASHBOARD
+            
         st.markdown("---")
-        return menu
+        return str(selected_menu)
 
-def render_metrics(df):
+def render_dashboard_statistics(inventory_dataframe: pd.DataFrame) -> None:
     """!
-    @brief Merender Kartu Metrik (Statistik) di Dashboard Utama.
-    @param df [pandas.DataFrame] Dataset untuk bahan kalkulasi metrik.
+    @brief Menampilkan 4 Kartu Metrik Statistik Utama pada menu Dashboard.
     """
-    col1, col2, col3, col4 = st.columns(4)
-    with col1: st.metric("Total Perangkat", f"{len(df)}", "Unit")
-    with col2: st.metric("Kondisi Baik", f"{len(df[df['kondisi'] == 'Baik'])}", "Unit")
-    with col3: st.metric("Maintenance", f"{len(df[df['kondisi'] == 'Maintenance'])}", "Unit")
-    with col4: st.metric("Rusak", f"{len(df[df['kondisi'] == 'Rusak'])}", "Unit")
+    metric_col_total, metric_col_good, metric_col_mt, metric_col_broken = st.columns(4)
+    
+    with metric_col_total: 
+        st.metric("Total Perangkat", f"{len(inventory_dataframe)}", "Unit")
+    with metric_col_good: 
+        st.metric(f"Kondisi {CONDITION_GOOD}", f"{len(inventory_dataframe[inventory_dataframe['kondisi'] == CONDITION_GOOD])}", "Unit")
+    with metric_col_mt: 
+        st.metric(CONDITION_MAINTENANCE, f"{len(inventory_dataframe[inventory_dataframe['kondisi'] == CONDITION_MAINTENANCE])}", "Unit")
+    with metric_col_broken: 
+        st.metric(f"Kondisi {CONDITION_BROKEN}", f"{len(inventory_dataframe[inventory_dataframe['kondisi'] == CONDITION_BROKEN])}", "Unit")
+        
     st.markdown("<br>", unsafe_allow_html=True)
 
-def render_charts(df):
+def render_dashboard_visualizations(inventory_dataframe: pd.DataFrame) -> None:
     """!
-    @brief Merender grafik Pie Chart menggunakan Plotly.
-    @param df [pandas.DataFrame] Dataset untuk visualisasi distribusi Kondisi dan PIC.
+    @brief Merender Visualisasi Grafis (Pie Chart) distribusi Kondisi dan PIC secara dinamis.
     """
-    if df.empty:
+    if inventory_dataframe.empty:
         return
         
     st.markdown("---")
-    cg1, cg2 = st.columns(2)
+    chart_col_condition, chart_col_pic = st.columns(2)
     
-    # Grafik 1: Distribusi Kondisi
-    with cg1:
-        df_kondisi = df['kondisi'].value_counts().reset_index()
-        df_kondisi.columns = ['Kondisi', 'Jumlah']
+    with chart_col_condition:
+        condition_counts_df = inventory_dataframe['kondisi'].value_counts().reset_index()
+        condition_counts_df.columns = ['Kondisi', 'Jumlah']
+        condition_color_map = {CONDITION_GOOD: '#2ecc71', CONDITION_MAINTENANCE: '#f1c40f', CONDITION_BROKEN: '#e74c3c'}
         
-        # Warna kustom (Hijau: Baik, Kuning: Maintenance, Merah: Rusak)
-        color_map = {'Baik': '#2ecc71', 'Maintenance': '#f1c40f', 'Rusak': '#e74c3c'}
-        fig1 = px.pie(df_kondisi, values='Jumlah', names='Kondisi', 
+        pie_chart_condition = px.pie(condition_counts_df, values='Jumlah', names='Kondisi', 
                       title='Distribusi Kondisi Perangkat', hole=0.4,
-                      color='Kondisi', color_discrete_map=color_map)
-        fig1.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color="white")
-        st.plotly_chart(fig1, use_container_width=True)
+                      color='Kondisi', color_discrete_map=condition_color_map)
+        pie_chart_condition.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color="white")
+        st.plotly_chart(pie_chart_condition, use_container_width=True)
         
-    # Grafik 2: Distribusi Penanggungjawab / PIC
-    with cg2:
-        # Filter data kosong pada kolom pemilik
-        df_valid_pic = df[df['pemilik'].str.strip() != ""]
-        if not df_valid_pic.empty:
-            df_pic = df_valid_pic['pemilik'].value_counts().reset_index()
-            df_pic.columns = ['PIC', 'Jumlah']
+    with chart_col_pic:
+        valid_pic_dataframe = inventory_dataframe[inventory_dataframe['pemilik'].astype(str).str.strip() != ""]
+        if not valid_pic_dataframe.empty:
+            pic_counts_df = valid_pic_dataframe['pemilik'].value_counts().reset_index()
+            pic_counts_df.columns = ['PIC', 'Jumlah']
             
-            fig2 = px.pie(df_pic, values='Jumlah', names='PIC', 
+            pie_chart_pic = px.pie(pic_counts_df, values='Jumlah', names='PIC', 
                           title='Proporsi Penanggungjawab / PIC', hole=0.4)
-            fig2.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color="white")
-            fig2.update_traces(textposition='inside', textinfo='percent+label')
-            st.plotly_chart(fig2, use_container_width=True)
-        else:
-            st.info("Data Penanggungjawab (PIC) belum tersedia untuk divisualisasikan.")
+            pie_chart_pic.update_layout(paper_bgcolor='rgba(0,0,0,0)', font_color="white")
+            pie_chart_pic.update_traces(textposition='inside', textinfo='percent+label')
+            st.plotly_chart(pie_chart_pic, use_container_width=True)
 
-def render_edit_form(df):
+def render_inline_edit_form(inventory_dataframe: pd.DataFrame) -> None:
     """!
-    @brief Merender formulir pembaruan data secara dinamis apabila ID objek aktif dalam sesi.
-    @param df [pandas.DataFrame] Dataset eksisting untuk ditarik nilai lamanya (populate fields).
+    @brief Membangkitkan formulir pembaruan data secara "Inline" ketika ID target aktif.
     """
-    if st.session_state.edit_id is not None:
-        item_data = df[df['id'] == st.session_state.edit_id]
-        if not item_data.empty:
-            item = item_data.iloc[0]
-            with st.form("edit_form"):
-                st.markdown(f"### ✏️ Edit: **{item['nama_perangkat']}**")
-                
-                # Baris Input 1
-                ec1, ec2, ec3, ec4 = st.columns(4)
-                e_nama = ec1.text_input("Nama Perangkat", value=item['nama_perangkat'])
-                e_brand = ec2.text_input("Brand", value=item['brand'])
-                e_ip = ec3.text_input("IP Address", value=item['ip_address'])
-                e_sn = ec4.text_input("S/N", value=item['sn'])
-                
-                # Baris Input 2
-                ec5, ec6, ec7 = st.columns(3)
-                e_rak = ec5.text_input("Lokasi Rak", value=item['lokasi_rak'])
-                e_pemilik = ec6.text_input("Penanggungjawab / PIC", value=item['pemilik'])
-                
-                # Pengaturan Indeks Dropdown Status Kondisi
-                opts = ["Baik", "Rusak", "Maintenance"]
-                idx = opts.index(item['kondisi']) if item['kondisi'] in opts else 0
-                e_kondisi = ec7.selectbox("Kondisi", opts, index=idx)
-                
-                # Tombol Aksi Formulir
-                btn1, btn2 = st.columns([1, 6])
-                if btn1.form_submit_button("💾 SIMPAN"):
-                    update_item(st.session_state.edit_id, e_nama, e_brand, e_ip, e_sn, e_rak, e_pemilik, e_kondisi)
-                    st.session_state.edit_id = None
-                    st.success("Diupdate!")
-                    st.rerun()
-                if btn2.form_submit_button("❌ BATAL"):
-                    st.session_state.edit_id = None
-                    st.rerun()
-            st.markdown("---")
+    # Guard Clause: Hentikan fungsi jika mode edit tidak aktif
+    if st.session_state.edit_id is None:
+        return
 
-def render_data_table(df):
-    """!
-    @brief Merender Tabel Data berbasis HTML kustom untuk daftar Inventaris perangkat.
-    @param df [pandas.DataFrame] Dataset yang sudah difilter untuk ditampilkan dalam baris.
-    """
-    st.subheader("Daftar Perangkat")
+    target_device_data = inventory_dataframe[inventory_dataframe['id'] == st.session_state.edit_id]
     
-    # Render Flex Header Tabel
-    st.markdown("""
+    # Guard Clause: Hentikan jika ID tidak ditemukan pada dataframe
+    if target_device_data.empty:
+        return
+
+    device_record = target_device_data.iloc[0]
+    with st.form("edit_form"):
+        st.markdown(f"### ✏️ Edit: **{device_record['nama_perangkat']}**")
+        
+        form_col_name, form_col_brand, form_col_ip, form_col_sn = st.columns(4)
+        input_edit_name = form_col_name.text_input(COL_DEVICE_NAME, value=str(device_record['nama_perangkat']))
+        input_edit_brand = form_col_brand.text_input(COL_BRAND, value=str(device_record['brand']))
+        input_edit_ip = form_col_ip.text_input(COL_IP_ADDRESS, value=str(device_record['ip_address']))
+        input_edit_sn = form_col_sn.text_input(COL_SERIAL_NUMBER, value=str(device_record['sn']))
+        
+        form_col_rack, form_col_pic, form_col_condition = st.columns(3)
+        input_edit_rack = form_col_rack.text_input(COL_RACK_LOCATION, value=str(device_record['lokasi_rak']))
+        input_edit_pic = form_col_pic.text_input("PIC / Penanggungjawab", value=str(device_record['pemilik']))
+        
+        condition_options = [CONDITION_GOOD, CONDITION_BROKEN, CONDITION_MAINTENANCE]
+        current_condition_value = str(device_record['kondisi'])
+        
+        condition_index = 0
+        if current_condition_value in condition_options:
+            condition_index = condition_options.index(current_condition_value)
+            
+        input_edit_condition = form_col_condition.selectbox(COL_CONDITION, condition_options, index=condition_index)
+        
+        btn_col_save, btn_col_cancel = st.columns([1, 6])
+        
+        if btn_col_save.form_submit_button("💾 SIMPAN"):
+            final_condition = CONDITION_GOOD
+            if input_edit_condition:
+                final_condition = str(input_edit_condition)
+                
+            update_existing_device(st.session_state.edit_id, input_edit_name, input_edit_brand, input_edit_ip, input_edit_sn, input_edit_rack, input_edit_pic, final_condition)
+            st.session_state.edit_id = None
+            st.success("Data berhasil diperbarui!")
+            st.rerun()
+            
+        if btn_col_cancel.form_submit_button("❌ BATAL"):
+            st.session_state.edit_id = None
+            st.rerun()
+
+def render_interactive_data_table(inventory_dataframe: pd.DataFrame) -> None:
+    """!
+    @brief Merender *Smart Datatable* lengkap dengan filter Search Bar, Paginasi, dan Export Excel.
+    """
+    st.markdown("---")
+    st.subheader("Daftar Perangkat TIK")
+    
+    # KONTROL PENCARIAN
+    search_input_col, search_button_col = st.columns([10, 2])
+    with search_input_col:
+        search_query = st.text_input("Pencarian Data", placeholder="🔍 Ketik Nama, Brand, IP, SN, atau PIC...", label_visibility="collapsed")
+    with search_button_col:
+        st.button("Cari", use_container_width=True)
+
+    if search_query:
+        inventory_dataframe = inventory_dataframe[inventory_dataframe.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)]
+
+    # RENDER FORM EDIT
+    render_inline_edit_form(inventory_dataframe)
+
+    # KONTROL PAGINASI
+    inventory_dataframe = inventory_dataframe.reset_index(drop=True)
+    if len(inventory_dataframe) == 0:
+        st.info("Belum ada data atau tidak ditemukan hasil pencarian.")
+        return
+
+    st.write("") 
+
+    pagination_col_per_page, pagination_col_page_num, pagination_col_info = st.columns([2, 2, 6])
+    
+    with pagination_col_per_page:
+        selected_per_page = st.selectbox("Baris per halaman:", [10, 20, 50, 100], index=0)
+        items_per_page = 10
+        if selected_per_page:
+            items_per_page = int(selected_per_page)
+    
+    total_pages = max(1, math.ceil(len(inventory_dataframe) / items_per_page))
+    
+    with pagination_col_page_num:
+        selected_page_num = st.selectbox("Halaman ke:", range(1, total_pages + 1), index=0)
+        current_page_number = 1
+        if selected_page_num:
+            current_page_number = int(selected_page_num)
+
+    slice_start_index = (current_page_number - 1) * items_per_page
+    slice_end_index = min(slice_start_index + items_per_page, len(inventory_dataframe))
+    
+    with pagination_col_info:
+        st.markdown(f"<div style='text-align: right; padding-top: 32px; color: #bdc3c7;'>Menampilkan <b>{slice_start_index + 1} - {slice_end_index}</b> dari total <b>{len(inventory_dataframe)}</b> perangkat</div>", unsafe_allow_html=True)
+
+    paginated_dataframe = inventory_dataframe.iloc[slice_start_index:slice_end_index]
+
+    # RENDER TABEL (HTML)
+    st.markdown(f"""
     <div class="table-header">
         <div style="flex: 0.5;">No</div>
-        <div style="flex: 1.5;">Nama Perangkat</div>
-        <div style="flex: 1;">Brand</div>
-        <div style="flex: 1.2;">IP Address</div>
-        <div style="flex: 1.2;">S/N</div>
-        <div style="flex: 1;">Posisi Rak</div>
+        <div style="flex: 1.5;">{COL_DEVICE_NAME}</div>
+        <div style="flex: 1;">{COL_BRAND}</div>
+        <div style="flex: 1.2;">{COL_IP_ADDRESS}</div>
+        <div style="flex: 1.2;">{COL_SERIAL_NUMBER}</div>
+        <div style="flex: 1;">{COL_RACK_LOCATION}</div>
         <div style="flex: 1.2;">PIC / Penanggungjawab</div>
-        <div style="flex: 1;">Kondisi</div>
+        <div style="flex: 1;">{COL_CONDITION}</div>
         <div style="flex: 1; text-align: center;">Aksi</div>
     </div>
     """, unsafe_allow_html=True)
 
-    if len(df) == 0:
-        st.info("Belum ada data.")
-        return
-
-    # Render Baris demi Baris Data
-    for i, row in df.iterrows():
-        bg_badge = "#2ecc71" if row['kondisi'] == "Baik" else "#f1c40f" if row['kondisi'] == "Maintenance" else "#e74c3c"
+    for index, row_data in paginated_dataframe.iterrows():
+        # Menentukan warna lencana berdasarkan status
+        if row_data['kondisi'] == CONDITION_GOOD:
+            badge_color = "#2ecc71"
+        elif row_data['kondisi'] == CONDITION_MAINTENANCE:
+            badge_color = "#f1c40f"
+        else:
+            badge_color = "#e74c3c"
+            
+        display_number = slice_start_index + index + 1 
         
         with st.container():
-            c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns([0.5, 1.5, 1, 1.2, 1.2, 1, 1.2, 1, 1])
+            table_col_no, table_col_name, table_col_brand, table_col_ip, table_col_sn, table_col_rack, table_col_pic, table_col_cond, table_col_action = st.columns([0.5, 1.5, 1, 1.2, 1.2, 1, 1.2, 1, 1])
             
-            c1.markdown(f"<span>{i+1}</span>", unsafe_allow_html=True)
-            c2.markdown(f"<span>{row['nama_perangkat']}</span>", unsafe_allow_html=True)
-            c3.markdown(f"<span>{row['brand']}</span>", unsafe_allow_html=True)
-            c4.markdown(f"<span>{row['ip_address']}</span>", unsafe_allow_html=True)
-            c5.markdown(f"<span>{row['sn']}</span>", unsafe_allow_html=True)
-            c6.markdown(f"<span>{row['lokasi_rak']}</span>", unsafe_allow_html=True)
-            c7.markdown(f"<span>{row['pemilik']}</span>", unsafe_allow_html=True)
-            c8.markdown(f"<span style='background-color:{bg_badge}; color:white !important; padding:2px 8px; border-radius:10px; font-size:12px;'>{row['kondisi']}</span>", unsafe_allow_html=True)
+            table_col_no.markdown(f"<span>{display_number}</span>", unsafe_allow_html=True)
+            table_col_name.markdown(f"<span>{row_data['nama_perangkat']}</span>", unsafe_allow_html=True)
+            table_col_brand.markdown(f"<span>{row_data['brand']}</span>", unsafe_allow_html=True)
+            table_col_ip.markdown(f"<span>{row_data['ip_address']}</span>", unsafe_allow_html=True)
+            table_col_sn.markdown(f"<span>{row_data['sn']}</span>", unsafe_allow_html=True)
+            table_col_rack.markdown(f"<span>{row_data['lokasi_rak']}</span>", unsafe_allow_html=True)
+            table_col_pic.markdown(f"<span>{row_data['pemilik']}</span>", unsafe_allow_html=True)
+            table_col_cond.markdown(f"<span style='background-color:{badge_color}; color:white !important; padding:2px 8px; border-radius:10px; font-size:12px;'>{row_data['kondisi']}</span>", unsafe_allow_html=True)
             
-            # Kolom Eksekusi / Aksi
-            with c9:
-                bc1, bc2 = st.columns(2)
-                if bc1.button("✏️", key=f"e_{row['id']}"):
-                    st.session_state.edit_id = row['id']
+            with table_col_action:
+                action_btn_edit, action_btn_delete = st.columns(2)
+                if action_btn_edit.button("✏️", key=f"e_{row_data['id']}"):
+                    st.session_state.edit_id = row_data['id']
                     st.rerun()
-                if bc2.button("🗑️", key=f"d_{row['id']}"):
-                    delete_item(row['id'])
+                if action_btn_delete.button("🗑️", key=f"d_{row_data['id']}"):
+                    remove_device_by_id(int(row_data['id']))
                     st.rerun()
             st.markdown("<hr>", unsafe_allow_html=True)
 
+    # KONTROL EXPORT DATA
+    st.markdown("<br>", unsafe_allow_html=True)
+    _, export_button_col = st.columns([8, 2])
+    with export_button_col:
+        excel_binary_data = export_dataframe_to_excel_bytes(inventory_dataframe)
+        st.download_button(
+            label="📥 Export Data (Excel)", 
+            data=excel_binary_data, 
+            file_name="inventaris_pusdatin.xlsx", 
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", 
+            use_container_width=True
+        )
+
 # ==========================================
-# 4. KONTROL HALAMAN (ROUTER)
+# 4. KONTROL HALAMAN & HELPER IMPORT
 # ==========================================
 
-def page_dashboard(menu):
+def _process_dataframe_to_database(imported_dataframe: pd.DataFrame) -> int:
     """!
-    @brief Pengendali Halaman Dashboard Utama.
-    @param menu [str] Menu navigasi aktif yang mengarahkan parameter filter visual Halaman Dashboard.
+    @brief Menguraikan baris demi baris pada objek Excel impor dan menyimpannya ke Database.
+    @param imported_dataframe Dataset hasil validasi dari file Excel yang terunggah.
+    @return int Akumulasi jumlah data yang sukses diproses.
+    """
+    successful_import_count = 0
+    for _, row_data in imported_dataframe.iterrows():
+        imported_name = str(row_data[COL_DEVICE_NAME]).strip()
+        imported_brand = str(row_data[COL_BRAND]).strip()
+        imported_ip = str(row_data[COL_IP_ADDRESS]).strip()
+        imported_sn = str(row_data[COL_SERIAL_NUMBER]).strip()
+        imported_rack = str(row_data[COL_RACK_LOCATION]).strip()
+        imported_pic = str(row_data[COL_PIC]).strip()
+        
+        imported_condition = str(row_data[COL_CONDITION]).strip().capitalize()
+        if imported_condition not in [CONDITION_GOOD, CONDITION_BROKEN, CONDITION_MAINTENANCE]:
+            imported_condition = CONDITION_GOOD
+            
+        if imported_name and imported_sn:
+            insert_new_device(imported_name, imported_brand, imported_ip, imported_sn, imported_rack, imported_pic, imported_condition)
+            successful_import_count += 1
+            
+    return successful_import_count
+
+def _handle_excel_file_upload(uploaded_excel_file: Any) -> None:
+    """!
+    @brief Mengontrol logika utama penanganan berkas unggahan untuk Import Batch Excel.
+    """
+    try:
+        parsed_excel_dataframe = pd.read_excel(uploaded_excel_file).fillna("")
+        
+        if not all(column in parsed_excel_dataframe.columns for column in TEMPLATE_COLUMNS):
+            st.error("Struktur kolom tidak sesuai. Harap pastikan Anda menggunakan file Template yang diunduh pada Langkah 1.")
+            return
+
+        total_imported_rows = _process_dataframe_to_database(parsed_excel_dataframe)
+        st.success(f"Proses selesai! Berhasil mengimpor {total_imported_rows} baris data perangkat ke dalam sistem.")
+        
+    except Exception as error_message:
+        st.error(f"Terjadi kesalahan saat memproses file: {str(error_message)}")
+
+def _render_manual_data_entry_form() -> None:
+    """!
+    @brief Merender formulir statis untuk menginput satu barang baru secara manual.
+    """
+    with st.form("add_form", clear_on_submit=True):
+        st.write("Silakan isi data perangkat baru:")
+        
+        input_grid_col1, input_grid_col2, input_grid_col3, input_grid_col4 = st.columns(4)
+        input_device_name = input_grid_col1.text_input(COL_DEVICE_NAME)
+        input_brand = input_grid_col2.text_input(f"{COL_BRAND} / Merk")
+        input_ip_address = input_grid_col3.text_input(COL_IP_ADDRESS)
+        input_serial_number = input_grid_col4.text_input(f"{COL_SERIAL_NUMBER} (S/N)")
+        
+        input_grid_col5, input_grid_col6, input_grid_col7 = st.columns(3)
+        input_rack_location = input_grid_col5.text_input(f"{COL_RACK_LOCATION} (Cth: Rak A1 - U20)")
+        input_pic = input_grid_col6.text_input("PIC / Penanggungjawab") 
+        input_condition = input_grid_col7.selectbox("Kondisi Fisik", [CONDITION_GOOD, CONDITION_BROKEN, CONDITION_MAINTENANCE])
+        
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.form_submit_button("SIMPAN DATA", type="primary"):
+            if input_device_name and input_serial_number: 
+                final_condition_status = CONDITION_GOOD
+                if input_condition:
+                    final_condition_status = str(input_condition)
+                    
+                insert_new_device(input_device_name, input_brand, input_ip_address, input_serial_number, input_rack_location, input_pic, final_condition_status)
+                st.success(f"Perangkat {input_device_name} berhasil disimpan!")
+            else:
+                st.error("Gagal! Nama Perangkat dan Serial Number wajib diisi.")
+
+def _render_batch_excel_import_section() -> None:
+    """!
+    @brief Merender antarmuka unduhan template dan area unggah untuk migrasi Excel massal.
+    """
+    st.info("💡 **Tips Import:** Unduh template Excel yang disediakan, isi data sesuai kolom, lalu unggah kembali file tersebut ke sini.")
+    
+    st.markdown("#### Langkah 1: Unduh Template")
+    empty_template_dataframe = pd.DataFrame(columns=TEMPLATE_COLUMNS)
+    excel_template_bytes = export_dataframe_to_excel_bytes(empty_template_dataframe)
+    
+    st.download_button(
+        label="📥 Unduh Template Import (.xlsx)", 
+        data=excel_template_bytes, 
+        file_name="Template_Import_DC.xlsx", 
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+    st.markdown("---")
+    
+    st.markdown("#### Langkah 2: Upload File Data")
+    uploaded_excel_file = st.file_uploader("Unggah file template yang telah diisi (.xlsx)", type=['xlsx'])
+    
+    if uploaded_excel_file is not None:
+        if st.button("🚀 Eksekusi Import Data", type="primary"):
+            _handle_excel_file_upload(uploaded_excel_file)
+
+def route_to_dashboard_page(active_menu: str) -> None:
+    """!
+    @brief Pengendali Alur Halaman Dashboard Utama.
+    @param active_menu Menu navigasi yang sedang dipilih.
     """
     st.title("📊 Dashboard Inventaris")
-    df = get_all_data()
+    inventory_dataframe = fetch_all_inventory_data()
 
-    # Rendering Metrik & Grafik Khusus Halaman Dashboard
-    if menu == "Dashboard":
-        render_metrics(df)
-        render_charts(df)
+    if active_menu == MENU_ITEM_DASHBOARD:
+        render_dashboard_statistics(inventory_dataframe)
+        render_dashboard_visualizations(inventory_dataframe)
 
-    # UI Komponen Pencarian Universal & Download Excel
-    c_search, c_dl = st.columns([3, 1])
-    with c_search:
-        search_query = st.text_input("🔍 Cari (Nama/Brand/IP/SN/PIC)...")
-    with c_dl:
-        st.write("") 
-        excel_data = convert_df_to_excel(df)
-        st.download_button("📥 Download Excel", excel_data, "inventaris_pusdatin.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    render_interactive_data_table(inventory_dataframe)
 
-    # Proses Filtering DataFrame Berdasarkan Kueri
-    if search_query:
-        df = df[df.apply(lambda row: row.astype(str).str.contains(search_query, case=False).any(), axis=1)]
-
-    # Eksekusi Render Tabel Form
-    render_edit_form(df)
-    render_data_table(df)
-
-def page_add_inventory():
+def route_to_management_page() -> None:
     """!
-    @brief Pengendali Halaman Formulir Tambah Data Baru & Import Excel.
-    @details Menggunakan sistem Tabs untuk memisahkan input manual dan import massal berdasar template.
+    @brief Pengendali Alur Halaman "Tambah Data Baru" dan Import Data.
     """
     st.title("➕ Manajemen Perangkat Baru")
     
-    # Membagi antarmuka menjadi 2 Tab
-    tab_manual, tab_import = st.tabs(["✍️ Input Manual", "📁 Import Massal (Excel)"])
+    ui_tab_manual, ui_tab_import = st.tabs(["✍️ Input Manual", "📁 Import Massal (Excel)"])
     
-    # --- TAB 1: INPUT MANUAL ---
-    with tab_manual:
-        with st.form("add_form", clear_on_submit=True):
-            st.write("Silakan isi data perangkat baru:")
-            
-            c1, c2, c3, c4 = st.columns(4)
-            nama = c1.text_input("Nama Perangkat")
-            brand = c2.text_input("Brand / Merk")
-            ip = c3.text_input("IP Address")
-            sn = c4.text_input("Serial Number (S/N)")
-            
-            c5, c6, c7 = st.columns(3)
-            rak = c5.text_input("Lokasi Rak (Cth: Rak A1 - U20)")
-            pemilik = c6.text_input("Penanggungjawab / PIC")
-            kondisi = c7.selectbox("Kondisi Fisik", ["Baik", "Rusak", "Maintenance"])
-            
-            st.markdown("<br>", unsafe_allow_html=True)
-            if st.form_submit_button("SIMPAN DATA", type="primary"):
-                if nama and sn: 
-                    add_item(nama, brand, ip, sn, rak, pemilik, kondisi)
-                    st.success(f"Perangkat {nama} berhasil disimpan!")
-                else:
-                    st.error("Gagal! Nama Perangkat dan Serial Number wajib diisi.")
+    with ui_tab_manual:
+        _render_manual_data_entry_form()
 
-    # --- TAB 2: IMPORT MASSAL ---
-    with tab_import:
-        st.info("💡 **Tips Import:** Unduh template Excel yang disediakan, isi data sesuai kolom, lalu unggah kembali file tersebut ke sini.")
-        
-        # 1. Fitur Unduh Template
-        st.markdown("#### Langkah 1: Unduh Template")
-        col_template = ["Nama Perangkat", "Brand", "IP Address", "Serial Number", "Lokasi Rak", "PIC", "Kondisi"]
-        df_template = pd.DataFrame(columns=col_template)
-        template_bytes = convert_df_to_excel(df_template)
-        
-        st.download_button(
-            label="📥 Unduh Template Import (.xlsx)", 
-            data=template_bytes, 
-            file_name="Template_Import_DC.xlsx", 
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-        
-        st.markdown("---")
-        
-        # 2. Fitur Upload & Proses
-        st.markdown("#### Langkah 2: Upload File Data")
-        uploaded_file = st.file_uploader("Unggah file template yang telah diisi (.xlsx)", type=['xlsx'])
-        
-        if uploaded_file is not None:
-            if st.button("🚀 Eksekusi Import Data", type="primary"):
-                try:
-                    # Membaca excel dan mengisi field kosong (NaN) dengan string kosong
-                    df_import = pd.read_excel(uploaded_file).fillna("")
-                    
-                    # Validasi struktur kolom
-                    if all(col in df_import.columns for col in col_template):
-                        sukses_count = 0
-                        for _, row in df_import.iterrows():
-                            v_nama = str(row["Nama Perangkat"]).strip()
-                            v_brand = str(row["Brand"]).strip()
-                            v_ip = str(row["IP Address"]).strip()
-                            v_sn = str(row["Serial Number"]).strip()
-                            v_rak = str(row["Lokasi Rak"]).strip()
-                            v_pic = str(row["PIC"]).strip()
-                            
-                            v_kondisi = str(row["Kondisi"]).strip().capitalize()
-                            if v_kondisi not in ["Baik", "Rusak", "Maintenance"]:
-                                v_kondisi = "Baik" # Default fallback
-                                
-                            # Cek minimal Nama dan SN terisi agar data valid
-                            if v_nama and v_sn:
-                                add_item(v_nama, v_brand, v_ip, v_sn, v_rak, v_pic, v_kondisi)
-                                sukses_count += 1
-                                
-                        st.success(f"Proses selesai! Berhasil mengimpor {sukses_count} baris data perangkat ke dalam sistem.")
-                    else:
-                        st.error("Struktur kolom tidak sesuai. Harap pastikan Anda menggunakan file Template yang diunduh pada Langkah 1.")
-                except Exception as e:
-                    st.error(f"Terjadi kesalahan saat memproses file: {e}")
-
+    with ui_tab_import:
+        _render_batch_excel_import_section()
 
 # ==========================================
 # 5. ENTRY POINT UTAMA
 # ==========================================
 
-def main():
+def main() -> None:
     """!
-    @brief Fungsi Main (Utama) untuk menginisiasi skrip secara berurutan.
+    @brief Fungsi Inisiasi Main Router.
     """
-    apply_custom_css()
-    init_db()
+    inject_custom_theme_css()
+    initialize_database()
 
-    # Inisialisasi Environment Variabel sementara jika baru pertama kali diakses.
     if 'edit_id' not in st.session_state:
         st.session_state.edit_id = None
 
-    menu = render_sidebar()
+    selected_menu = render_sidebar_navigation()
 
-    # Logika Router
-    if menu in ["Dashboard", "Lihat Daftar Inventaris"]:
-        page_dashboard(menu)
-    elif menu == "Tambah Inventaris Baru":
-        page_add_inventory()
+    if selected_menu in [MENU_ITEM_DASHBOARD, MENU_ITEM_LIST]:
+        route_to_dashboard_page(selected_menu)
+    elif selected_menu == MENU_ITEM_ADD:
+        route_to_management_page()
 
 if __name__ == '__main__':
     main()
