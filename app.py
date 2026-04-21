@@ -263,15 +263,14 @@ def render_inline_edit_form(inventory_dataframe: pd.DataFrame) -> None:
     with st.form("edit_form"):
         st.markdown(f"### ✏️ Edit: **{device_record['nama_perangkat']}**")
         
-        form_col_name, form_col_brand, form_col_ip, form_col_sn = st.columns(4)
-        input_edit_name = form_col_name.text_input(COL_DEVICE_NAME, value=str(device_record['nama_perangkat']))
-        input_edit_brand = form_col_brand.text_input(COL_BRAND, value=str(device_record['brand']))
-        input_edit_ip = form_col_ip.text_input(COL_IP_ADDRESS, value=str(device_record['ip_address']))
-        input_edit_sn = form_col_sn.text_input(COL_SERIAL_NUMBER, value=str(device_record['sn']))
-        
-        form_col_rack, form_col_pic, form_col_condition = st.columns(3)
-        input_edit_rack = form_col_rack.text_input(COL_RACK_LOCATION, value=str(device_record['lokasi_rak']))
-        input_edit_pic = form_col_pic.text_input("PIC / Penanggungjawab", value=str(device_record['pemilik']))
+        # FORM VERTIKAL: Menghapus layout berkolom (st.columns), 
+        # sehingga komponen merender urut vertikal penuh sesuai gaya desain baru
+        input_edit_name = st.text_input(COL_DEVICE_NAME, value=str(device_record['nama_perangkat']))
+        input_edit_brand = st.text_input(COL_BRAND, value=str(device_record['brand']))
+        input_edit_ip = st.text_input(COL_IP_ADDRESS, value=str(device_record['ip_address']))
+        input_edit_sn = st.text_input(COL_SERIAL_NUMBER, value=str(device_record['sn']))
+        input_edit_rack = st.text_input(COL_RACK_LOCATION, value=str(device_record['lokasi_rak']))
+        input_edit_pic = st.text_input("PIC / Penanggungjawab", value=str(device_record['pemilik']))
         
         condition_options = [CONDITION_GOOD, CONDITION_BROKEN, CONDITION_MAINTENANCE]
         current_condition_value = str(device_record['kondisi'])
@@ -280,8 +279,9 @@ def render_inline_edit_form(inventory_dataframe: pd.DataFrame) -> None:
         if current_condition_value in condition_options:
             condition_index = condition_options.index(current_condition_value)
             
-        input_edit_condition = form_col_condition.selectbox(COL_CONDITION, condition_options, index=condition_index)
+        input_edit_condition = st.selectbox(COL_CONDITION, condition_options, index=condition_index)
         
+        st.markdown("<br>", unsafe_allow_html=True)
         btn_col_save, btn_col_cancel = st.columns([1, 6])
         
         if btn_col_save.form_submit_button("💾 SIMPAN"):
@@ -464,16 +464,14 @@ def _render_manual_data_entry_form() -> None:
     with st.form("add_form", clear_on_submit=True):
         st.write("Silakan isi data perangkat baru:")
         
-        input_grid_col1, input_grid_col2, input_grid_col3, input_grid_col4 = st.columns(4)
-        input_device_name = input_grid_col1.text_input(COL_DEVICE_NAME)
-        input_brand = input_grid_col2.text_input(f"{COL_BRAND} / Merk")
-        input_ip_address = input_grid_col3.text_input(COL_IP_ADDRESS)
-        input_serial_number = input_grid_col4.text_input(f"{COL_SERIAL_NUMBER} (S/N)")
-        
-        input_grid_col5, input_grid_col6, input_grid_col7 = st.columns(3)
-        input_rack_location = input_grid_col5.text_input(f"{COL_RACK_LOCATION} (Cth: Rak A1 - U20)")
-        input_pic = input_grid_col6.text_input("PIC / Penanggungjawab") 
-        input_condition = input_grid_col7.selectbox("Kondisi Fisik", [CONDITION_GOOD, CONDITION_BROKEN, CONDITION_MAINTENANCE])
+        # FORM VERTIKAL: Semua input dibariskan turun ke bawah
+        input_device_name = st.text_input(COL_DEVICE_NAME)
+        input_brand = st.text_input(f"{COL_BRAND} / Merk")
+        input_ip_address = st.text_input(COL_IP_ADDRESS)
+        input_serial_number = st.text_input(f"{COL_SERIAL_NUMBER} (S/N)")
+        input_rack_location = st.text_input(f"{COL_RACK_LOCATION} (Cth: Rak A1 - U20)")
+        input_pic = st.text_input("PIC / Penanggungjawab") 
+        input_condition = st.selectbox("Kondisi Fisik", [CONDITION_GOOD, CONDITION_BROKEN, CONDITION_MAINTENANCE])
         
         st.markdown("<br>", unsafe_allow_html=True)
         if st.form_submit_button("SIMPAN DATA", type="primary"):
