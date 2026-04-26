@@ -522,8 +522,8 @@ def route_to_dashboard_page(active_menu: str) -> None:
     if active_menu == MENU_ITEM_DASHBOARD:
         render_dashboard_statistics(inventory_dataframe)
         render_dashboard_visualizations(inventory_dataframe)
-
-    render_interactive_data_table(inventory_dataframe)
+    else:
+        render_interactive_data_table(inventory_dataframe)
 
 def route_to_management_page() -> None:
     """!
@@ -531,7 +531,7 @@ def route_to_management_page() -> None:
     """
     st.title("➕ Manajemen Perangkat Baru")
     
-    ui_tab_manual, ui_tab_import = st.tabs(["✍️ Input Manual", "📁 Import Massal (Excel)"])
+    ui_tab_manual, ui_tab_import = st.tabs(["Input Manual", "Import Massal (Excel)"])
     
     with ui_tab_manual:
         _render_manual_data_entry_form()
